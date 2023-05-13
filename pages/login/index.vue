@@ -21,8 +21,10 @@ const handleLogin = () => {
         login({
             username: values.username,
             password: encryptPassword(values.password),
+            sysName: 'call'
         }).then((res) => {
             uni.setStorageSync("token", res.token);
+            uni.setStorageSync("userId", res.user.user.id);
             uni.switchTab({
                 url: "/pages/index/index",
             });

@@ -1,5 +1,6 @@
-export const host = "http://121.40.16.125:8000";
+export const host = "http://121.40.16.125:8100";
 export const hostname = "http://121.40.16.125";
+export const wsHost = "ws://121.40.16.125:8100"
 
 export default (params) => {
     const { contentType = "application/json", method, url, data } = params;

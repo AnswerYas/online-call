@@ -27,10 +27,27 @@ export const newCallLog = (data) => {
     })
 }
 
+// 修改通话
+export const updateCallLog = (data) => {
+    return request({
+        url: '/api/customerCallLog',
+        method: 'PUT',
+        data,
+    })
+}
+
 // 获取用户信息
 export const getUserInfo = () => {
     return request({
         url: '/auth/info',
+        method: 'GET',
+    })
+}
+
+// 当前用户通话统计
+export const getUserCallStatistics = () => {
+    return request({
+        url: '/api/customerCallLog/statistics',
         method: 'GET',
     })
 }
