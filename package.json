@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "jsencrypt": "^3.3.2"
+    "jsencrypt": "^3.3.2",
+    "moment": "^2.29.4"
   }
 }

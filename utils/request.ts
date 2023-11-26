@@ -7,7 +7,7 @@ export default (params) => {
     let token = uni.getStorageSync("token") || "";
 
     const requestUrl = `${host}${url}`;
-    uni.showLoading({ title: "加载中..." });
+    // uni.showLoading({ title: "加载中..." });
     return new Promise((resolve, reject) => {
         uni.request({
             url: requestUrl,
@@ -49,7 +49,7 @@ export default (params) => {
                 reject(e.data);
             },
             complete: (e) => {
-                uni.hideLoading();
+                // uni.hideLoading();
                 resolve(e.data);
             },
         });

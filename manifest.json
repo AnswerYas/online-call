@@ -46,7 +46,12 @@
                     "<uses-permission android:name=\"android.permission.READ_CALL_LOG\"/>",
                     "<uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"/>",
                     "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\"/>"
-                ]
+                ],
+                /* 申请获取手机存储权限 */
+                "permissionExternalStorage" : {
+                    "request" : "once",
+                    "prompt" : "应用保存运行状态等信息，需要获取读写手机存储（系统提示为访问设备上的照片、媒体内容和文件）权限，请允许。"
+                }
             },
             "ios" : {
                 "dSYMs" : false

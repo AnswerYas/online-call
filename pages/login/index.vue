@@ -1,32 +1,37 @@
 <script setup>
-import { ref, reactive } from "vue";
-import { login } from "../../services";
-import { encryptPassword } from "../../utils";
+import { ref, reactive } from 'vue';
+import { login } from '../../services';
+import { encryptPassword } from '../../utils';
+import { wsHost, host } from '../../utils/request';
 
 const formRef = ref(null);
 const rules = {
     username: {
-        rules: [{ required: true, errorMessage: "请输入用户名" }],
+        rules: [{ required: true, errorMessage: '请输入用户名' }]
     },
     password: {
-        rules: [{ required: true, errorMessage: "请输入密码" }],
-    },
+        rules: [{ required: true, errorMessage: '请输入密码' }]
+    }
 };
 const formData = reactive({
-    username: "",
-    password: "",
+    username: '',
+    password: ''
 });
+// const formData = reactive({
+//     username: '15920092801',
+//     password: 'xyx3672628'
+// });
 const handleLogin = () => {
-    formRef.value.validate().then((values) => {
+    formRef.value.validate().then(values => {
         login({
             username: values.username,
             password: encryptPassword(values.password),
             sysName: 'call'
-        }).then((res) => {
-            uni.setStorageSync("token", res.token);
-            uni.setStorageSync("userId", res.user.user.id);
+        }).then(res => {
+            uni.setStorageSync('token', res.token);
+            uni.setStorageSync('userId', res.user.user.id);
             uni.switchTab({
-                url: "/pages/index/index",
+                url: '/pages/index/index'
             });
         });
     });
@@ -34,28 +39,12 @@ const handleLogin = () => {
 </script>
 <template>
     <view class="container">
-        <image
-            class="img"
-            src="../../assets/img/login-header.jpg"
-            mode="widthFix"
-        ></image>
+        <image class="img" src="../../assets/img/login-header.jpg" mode="widthFix"></image>
         <view class="login-form">
             <uni-forms ref="formRef" :rules="rules" :modelValue="formData">
-                <uni-forms-item required label="账号" name="username"
-                    ><uni-easyinput
-                        type="text"
-                        v-model="formData.username"
-                        placeholder="请输入账号"
-                /></uni-forms-item>
-                <uni-forms-item required label="密码" name="password"
-                    ><uni-easyinput
-                        type="password"
-                        v-model="formData.password"
-                        placeholder="请输入密码"
-                /></uni-forms-item>
-                <button @click="handleLogin" type="primary" class="btn">
-                    立即登录
-                </button>
+                <uni-forms-item required label="账号" name="username"><uni-easyinput type="text" v-model="formData.username" placeholder="请输入账号" /></uni-forms-item>
+                <uni-forms-item required label="密码" name="password"><uni-easyinput type="password" v-model="formData.password" placeholder="请输入密码" /></uni-forms-item>
+                <button @click="handleLogin" type="primary" class="btn">立即登录</button>
             </uni-forms>
         </view>
     </view>
