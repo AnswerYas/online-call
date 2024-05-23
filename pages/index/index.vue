@@ -1,34 +1,212 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
-import { getCallLog, updateCallLog, newCallLog } from '../../services';
-import { encryptPassword } from '../../utils';
-import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app';
-import { formatTel } from '../../utils';
+import { ref } from 'vue';
+import { onLoad, onPullDownRefresh, onShow, onHide } from '@dcloudio/uni-app';
 import Ws from '../../utils/ws';
+import { getCallLog, updateCallLog, newCallLog } from '../../services';
+import { formatTel } from '../../utils';
 import { wsHost, host } from '../../utils/request';
-import moment from 'moment';
 
-const recorderManager = uni.getRecorderManager();
-const innerAudioContext = uni.createInnerAudioContext();
-
+let ws = null;
+let recorderManager = uni.getRecorderManager();
+const oldEntries = ref([]);
+const status = ref('more');
 const records = ref([]);
 const page = ref(1);
 const size = 200;
-const status = ref('more');
-const ws = ref();
-const startTime = ref(0);
-const endTime = ref(0);
-const callStatus = ref();
-const filePathRes = ref();
-const contentText = { contentdown: '点击加载更多' };
-const callType = ref();
+const enableCall = ref(true);
 const callId = ref();
-const customerId = ref('');
-const recordsStart = ref();
-const onMessageCallId = ref();
-const currentPhoneStatus = ref();
-const currentPhone = ref();
-const isWs = ref(false);
+
+const clearUniStatus = () => {
+    uni.showToast({ title: '录音录制失败!' });
+    uni.hideLoading();
+    enableCall.value = true;
+};
+
+// 拨打手机
+const handleCall = message => {
+    console.log('***拨号***');
+    enableCall.value = false;
+    const data = JSON.parse(message.data);
+    if (data.msg) {
+        const msg = JSON.parse(data.msg);
+        if (msg.code === 'call') {
+            const phone = msg.content.customer.phone;
+            callId.value = msg.content.id;
+            plus.io.resolveLocalFileSystemURL(
+                '/storage/emulated/0/MIUI/sound_recorder/call_rec', //小米手机录音存放位置
+                function(entry) {
+                    var directoryReader = entry.createReader(); //获取读取目录对象
+                    directoryReader.readEntries(
+                        entries => {
+                            oldEntries.value = entries;
+                            plus.device.dial(phone, false);
+                        },
+                        err => {
+                            oldEntries.value = [];
+                            plus.device.dial(phone, false);
+                        }
+                    );
+                },
+                function(err) {
+                    oldEntries.value = [];
+                    plus.device.dial(phone, false);
+                    console.log('访问指定目录失败:' + err.message);
+                    console.log(err);
+                }
+            );
+        }
+    }
+};
+
+// 监控录音结束
+const onRecorderManagerStop = () => {
+    recorderManager.onStop(res => {
+        console.log('***录音结束***', res);
+        uni.showLoading({ title: '上传录音中...' });
+
+        plus.io.resolveLocalFileSystemURL(
+            '/storage/emulated/0/MIUI/sound_recorder/call_rec', //小米手机录音存放位置
+            entry => {
+                console.log('***开始上传***');
+                const directoryReader = entry.createReader();
+                directoryReader.readEntries(entries => {
+                    console.log('***文件列表***', entries);
+                    if (entries.length === oldEntries.value.length) {
+                        clearUniStatus();
+                        return;
+                    }
+
+                    let currentRecord;
+                    for (let item of entries) {
+                        if (!oldEntries.value.find(recordItem => recordItem.name === item.name)) {
+                            currentRecord = item;
+                            break;
+                        }
+                    }
+
+                    if (!currentRecord) {
+                        clearUniStatus();
+                        return;
+                    }
+
+                    // 上传文件
+                    uni.uploadFile(
+                        {
+                            url: `${host}/api/localStorage`,
+                            filePath: currentRecord.fullPath,
+                            name: 'file',
+                            header: {
+                                authorization: uni.getStorageSync('token')
+                            },
+                            success: response => {
+                                const res = JSON.parse(response.data);
+                                const filePath = `/file/${res.type}/${res.realName}`;
+                                updateCallLog({
+                                    filePath,
+                                    id: callId.value
+                                })
+                                    .then(() => {
+                                        console.log('新增通话记录成功');
+                                    })
+                                    .catch(err => {
+                                        console.log(JSON.stringify(err));
+                                    })
+                                    .then(() => {
+                                        uni.hideLoading();
+                                        getPageList(() => {}, true);
+                                        enableCall.value = true;
+                                    });
+                            },
+                            fail: err => {
+                                clearUniStatus();
+                                console.log(err);
+                            }
+                        },
+                        err => {
+                            clearUniStatus();
+                            console.log(err);
+                        }
+                    );
+                });
+            },
+            err => {
+                clearUniStatus();
+                console.log(err);
+            }
+        );
+    });
+};
+
+// 监控手机通话状态
+const onPhoneStatus = () => {
+    let runtimeMainActivity = plus.android.runtimeMainActivity();
+    let Contexttest = plus.android.importClass('android.content.Context');
+    let telephonyManager = plus.android.importClass('android.telephony.TelephonyManager');
+    let telManager = plus.android.runtimeMainActivity().getSystemService(Contexttest.TELEPHONY_SERVICE);
+    let receiver = plus.android.implements('io.dcloud.android.content.BroadcastReceiver', {
+        onReceive: function(Contexttest, intent) {
+            plus.android.importClass(intent);
+            //电话状态 0->空闲状态 1->振铃状态 2->通话存在
+            let phoneStatus = telManager.getCallState();
+            switch (phoneStatus) {
+                case 0:
+                    console.log('0、结束录音');
+                    recorderManager.stop();
+                    break;
+                case 1:
+                    console.log('1、振铃状态');
+                    break;
+                case 2:
+                    console.log('2、通话存在');
+                    recorderManager.start({
+                        duration: 600000 // 时长 10分钟
+                    });
+                    break;
+                default:
+                    break;
+            }
+        }
+    });
+
+    let IntentFilter = plus.android.importClass('android.content.IntentFilter');
+    let filter = new IntentFilter();
+    filter.addAction(telephonyManager.ACTION_PHONE_STATE_CHANGED);
+    runtimeMainActivity.registerReceiver(receiver, filter);
+};
+
+const closeSocket = () => {
+    if (!ws) return;
+    ws.close();
+    ws = null;
+};
+// 开始建立连接
+const connectSocket = () => {
+    ws = new Ws({
+        // 连接websocket所需参数
+        data: {},
+        // 首次连接成功/断线重新连接后触发（防止断线期间对方发送消息未接收到）
+        onConnected: () => {},
+        // 监听接收到服务器消息
+        onMessage: e => {
+            if (enableCall.value) {
+                handleCall(e);
+            }
+            console.log('收到消息', e);
+            // 监听服务端推送给你的新数据，然后更新到页面上
+            // ... doSth
+        }
+    });
+};
+
+const handleMore = () => {
+    if (status.value !== 'loading' && status.value !== 'noMore') {
+        page.value += 1;
+        status.value = 'loading';
+        getPageList(() => {
+            status.value = 'more';
+        });
+    }
+};
 
 const getPageList = async (onSuccess, isFrefresh) => {
     const res = await getCallLog({
@@ -50,256 +228,24 @@ const getPageList = async (onSuccess, isFrefresh) => {
     }
 };
 
-const handleCall = params => {
-    isWs.value = true;
-    plus.io.resolveLocalFileSystemURL(
-        '/storage/emulated/0/MIUI/sound_recorder/call_rec', //小米手机录音存放位置
-        function(entry) {
-            var directoryReader = entry.createReader(); //获取读取目录对象
-            directoryReader.readEntries(
-                function(entries) {
-                    for (let item of entries) {
-                        console.log('***fullpath***' + item.fullPath);
-                    }
-
-                    recordsStart.value = entries;
-                    const { phone, type, id } = params;
-                    plus.device.dial(phone, false);
-                    callType.value = type;
-                    callId.value = id;
-                    console.log(params.customerId);
-                    console.log('***call***');
-                    customerId.value = params.customerId;
-                    currentPhone.value = phone;
-                },
-                function(err) {
-                    console.log('访问目录失败:');
-                    console.log(err);
-                }
-            );
-        },
-        function(err) {
-            console.log('访问指定目录失败:' + err.message);
-            console.log(err);
-        }
-    );
-};
-
-const handleMore = () => {
-    if (status.value !== 'loading' && status.value !== 'noMore') {
-        page.value += 1;
-        status.value = 'loading';
-        getPageList(() => {
-            status.value = 'more';
-        });
-    }
-};
-
-// uni.connectSocket({
-//     url: `${wsHost}/webSocket/${uni.getStorageSync('userId')}`
-// });
-
-onShow(() => {
-    console.log('***onshow***');
+onShow(async () => {
+    console.log('***show***');
+    enableCall.value = true;
+    connectSocket();
     getPageList(() => {}, true);
-    console.log('***onload***');
-
-    let startTime = 0;
-    let endTime = 0;
-
-    uni.connectSocket({
-        url: `${wsHost}/webSocket/${uni.getStorageSync('userId')}`,
-        success(res) {
-            console.log('connect success');
-        }
-    });
-
-    uni.onSocketOpen(function(res) {
-        console.log('WebSocket连接已打开！');
-    });
-    uni.onSocketError(function(res) {
-        console.log('WebSocket连接打开失败，请检查！');
-    });
-    uni.onSocketMessage(function(message) {
-        console.log(message);
-        const data = JSON.parse(message.data);
-        if (data.msg) {
-            const msg = JSON.parse(data.msg);
-            if (msg.code === 'call') {
-                console.log('***currentPhoneStatus***' + currentPhoneStatus.value);
-                if (!isWs.value && currentPhoneStatus.value !== 1 && currentPhoneStatus.value !== 2) {
-                    handleCall({
-                        phone: msg.content.customer.phone,
-                        type: 'update',
-                        id: msg.content.id
-                    });
-                }
-            }
-        }
-    });
-
-    uni.onSocketClose(function(res) {
-        console.log('WebSocket 已关闭！');
-    });
-
-    recorderManager.onStop(function(res) {
-        // endTime.value = Math.round(new Date().getTime() / 1000);
-        console.log('record' + JSON.stringify(res));
-        endTime = Math.round(new Date().getTime() / 1000);
-        const endRecordTime = new Date();
-        console.log(endRecordTime);
-
-        plus.io.resolveLocalFileSystemURL(
-            '/storage/emulated/0/MIUI/sound_recorder/call_rec', //小米手机录音存放位置
-            function(entry) {
-                var directoryReader = entry.createReader(); //获取读取目录对象
-                directoryReader.readEntries(
-                    function(entries) {
-                        if (entries.length === recordsStart.value.length) return;
-                        let currentRecord;
-                        for (let item of entries) {
-                            if (!recordsStart.value.find(recordItem => recordItem.name === item.name)) {
-                                currentRecord = item;
-                                break;
-                            }
-                        }
-                        if (!currentRecord) return;
-                        console.log('***保存录音***');
-                        uni.showLoading({
-                            title: '保存录音中,请稍后...',
-                            mask: true,
-                            fail: () => {
-                                console.log('loading失败');
-                            },
-                            success: () => {
-                                console.log('loading成功');
-                            }
-                        });
-                        uni.uploadFile({
-                            url: `${host}/api/localStorage`,
-                            filePath: currentRecord.fullPath,
-                            name: 'file',
-                            header: {
-                                authorization: uni.getStorageSync('token')
-                            },
-                            success: response => {
-                                console.log('上传成功' + JSON.stringify(response));
-                                const res = JSON.parse(response.data);
-                                const filePath = `/file/${res.type}/${res.realName}`;
-                                let callTimeLength = 0;
-                                // if (startTime.value && endTime.value) {
-                                //     callTimeLength = endTime.value - startTime.value;
-                                // }
-                                if (startTime && endTime) {
-                                    callTimeLength = endTime - startTime;
-                                }
-                                // if (currentPhone.value !== currentRecord.name.split('(')[0]) return;
-                                if (callType.value === 'update') {
-                                    updateCallLog({
-                                        id: callId.value,
-                                        callTimeLength,
-                                        filePath
-                                    })
-                                        .then(() => {
-                                            console.log('更新通话记录成功');
-                                        })
-                                        .catch(err => {
-                                            console.log(JSON.stringify(err));
-                                        })
-                                        .then(() => {
-                                            startTime = 0;
-                                            endTime = 0;
-                                            uni.hideLoading();
-                                            isWs.value = false;
-                                            getPageList(() => {}, true);
-                                        });
-                                } else {
-                                    newCallLog({
-                                        callTimeLength,
-                                        filePath,
-                                        customerId: customerId.value
-                                    })
-                                        .then(() => {
-                                            console.log(customerId.value);
-                                            console.log('新增通话记录成功');
-                                        })
-                                        .catch(err => {
-                                            console.log(JSON.stringify(err));
-                                        })
-                                        .then(() => {
-                                            startTime = 0;
-                                            endTime = 0;
-                                            uni.hideLoading();
-                                            isWs.value = false;
-                                            getPageList(() => {}, true);
-                                        });
-                                }
-                            },
-                            fail(err) {
-                                console.log('上传文件失败');
-                                uni.showToast({
-                                    title: '上传文件失败'
-                                });
-                            },
-                            complete() {}
-                        });
-                    },
-                    function(err) {
-                        console.log('访问目录失败:');
-                        console.log(err);
-                    }
-                );
-            },
-            function(err) {
-                console.log('访问指定目录失败:' + err.message);
-                console.log(err);
-            }
-        );
-    });
-
-    let maintest = plus.android.runtimeMainActivity();
-    let Contexttest = plus.android.importClass('android.content.Context');
-    let telephonyManager = plus.android.importClass('android.telephony.TelephonyManager');
-    let telManager = plus.android.runtimeMainActivity().getSystemService(Contexttest.TELEPHONY_SERVICE);
-    let receiver = plus.android.implements('io.dcloud.android.content.BroadcastReceiver', {
-        onReceive: function(Contexttest, intent) {
-            plus.android.importClass(intent);
-            let phoneStatus = telManager.getCallState();
-
-            callStatus.value = phoneStatus; //电话状态 0->空闲状态 1->振铃状态 2->通话存在
-            switch (phoneStatus) {
-                case 0:
-                    console.log('0、结束录音');
-                    recorderManager.stop();
-                    currentPhoneStatus.value = 0;
-                    break;
-                case 1:
-                    console.log('1、振铃状态');
-                    currentPhoneStatus.value = 1;
-                    break;
-                case 2:
-                    console.log('2、通话存在');
-                    // startTime.value = Math.round(new Date().getTime() / 1000);
-                    startTime = Math.round(new Date().getTime() / 1000);
-                    currentPhoneStatus.value = 2;
-                    recorderManager.start({
-                        duration: 600000 // 时长 10分钟
-                    });
-                    break;
-            }
-        }
-    });
-
-    let IntentFilter = plus.android.importClass('android.content.IntentFilter');
-    let filter = new IntentFilter();
-    filter.addAction(telephonyManager.ACTION_PHONE_STATE_CHANGED);
-    maintest.registerReceiver(receiver, filter);
 });
 
-onLoad(async function() {});
+onHide(async () => {
+    console.log('***hide***');
+    closeSocket();
+    // runtimeMainActivity = null;
+    // recorderManager.offStop();
+    // recorderManager = null;
+});
 
-onHide(async function() {
-    uni.closeSocket();
+onLoad(async () => {
+    onPhoneStatus();
+    onRecorderManagerStop();
 });
 
 onPullDownRefresh(() => {
@@ -317,23 +263,7 @@ onPullDownRefresh(() => {
         <view>{{ filePathRes }}</view>
         <scroll-view scroll-y>
             <uni-list>
-                <uni-list-item
-                    v-for="item in records"
-                    :key="item.id"
-                    :title="item?.customer.customeName"
-                    :note="formatTel(item?.customer.phone)"
-                    showArrow
-                    thumb-size="lg"
-                    :clickable="true"
-                    @click="
-                        () =>
-                            handleCall({
-                                phone: item?.customer.phone,
-                                type: 'new',
-                                customerId: item?.customer.id
-                            })
-                    "
-                >
+                <uni-list-item v-for="item in records" :key="item.id" :title="item?.customer.customeName" :note="formatTel(item?.customer.phone)" showArrow thumb-size="lg">
                     <template v-slot:footer>
                         <view>
                             <view class="chat-custom-right">{{ item.callTime }}</view>
